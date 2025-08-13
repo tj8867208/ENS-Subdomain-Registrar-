@@ -243,3 +243,200 @@
 )
 
 (define-constant ERR-DOMAIN-EXISTS (err u109))
+(define-constant ERR-LISTING-NOT-FOUND (err u110))
+(define-constant ERR-LISTING-EXISTS (err u111))
+(define-constant ERR-CANNOT-BUY-OWN-LISTING (err u112))
+(define-constant ERR-LISTING-EXPIRED (err u113))
+
+(define-data-var marketplace-fee-percent uint u5)
+
+(define-map domain-listings
+  { domain: (string-ascii 64) }
+  { 
+    seller: principal,
+    price: uint,
+    listed-at: uint,
+    expiry: uint
+  }
+)
+
+(define-map subdomain-listings
+  { domain: (string-ascii 64), subdomain: (string-ascii 64) }
+  { 
+    seller: principal,
+    price: uint,
+    listed-at: uint,
+    expiry: uint
+  }
+)
+
+(define-read-only (get-domain-listing (domain (string-ascii 64)))
+  (map-get? domain-listings { domain: domain })
+)
+
+(define-read-only (get-subdomain-listing (domain (string-ascii 64)) (subdomain (string-ascii 64)))
+  (map-get? subdomain-listings { domain: domain, subdomain: subdomain })
+)
+
+(define-read-only (get-marketplace-fee-percent)
+  (var-get marketplace-fee-percent)
+)
+
+(define-read-only (is-listing-expired (listed-at uint) (expiry uint))
+  (> stacks-block-height (+ listed-at expiry))
+)
+
+(define-private (calculate-marketplace-fee (price uint))
+  (/ (* price (var-get marketplace-fee-percent)) u100)
+)
+
+(define-public (list-domain-for-sale (domain (string-ascii 64)) (price uint) (duration uint))
+  (let ((domain-info (unwrap! (get-domain-info domain) ERR-DOMAIN-NOT-FOUND)))
+    (asserts! (is-eq (get owner domain-info) tx-sender) ERR-NOT-DOMAIN-OWNER)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (is-none (get-domain-listing domain)) ERR-LISTING-EXISTS)
+    (asserts! (> price u0) ERR-INSUFFICIENT-PAYMENT)
+    
+    (map-set domain-listings
+      { domain: domain }
+      { 
+        seller: tx-sender,
+        price: price,
+        listed-at: stacks-block-height,
+        expiry: duration
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (list-subdomain-for-sale (domain (string-ascii 64)) (subdomain (string-ascii 64)) (price uint) (duration uint))
+  (let ((subdomain-info (unwrap! (get-subdomain-info domain subdomain) ERR-SUBDOMAIN-NOT-FOUND)))
+    (asserts! (is-eq (get owner subdomain-info) tx-sender) ERR-NOT-DOMAIN-OWNER)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (is-none (get-subdomain-listing domain subdomain)) ERR-LISTING-EXISTS)
+    (asserts! (> price u0) ERR-INSUFFICIENT-PAYMENT)
+    
+    (map-set subdomain-listings
+      { domain: domain, subdomain: subdomain }
+      { 
+        seller: tx-sender,
+        price: price,
+        listed-at: stacks-block-height,
+        expiry: duration
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (buy-domain (domain (string-ascii 64)))
+  (let ((listing (unwrap! (get-domain-listing domain) ERR-LISTING-NOT-FOUND))
+        (domain-info (unwrap! (get-domain-info domain) ERR-DOMAIN-NOT-FOUND))
+        (marketplace-fee (calculate-marketplace-fee (get price listing)))
+        (seller-amount (- (get price listing) marketplace-fee)))
+    
+    (asserts! (not (is-eq tx-sender (get seller listing))) ERR-CANNOT-BUY-OWN-LISTING)
+    (asserts! (not (is-listing-expired (get listed-at listing) (get expiry listing))) ERR-LISTING-EXPIRED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (>= (stx-get-balance tx-sender) (get price listing)) ERR-INSUFFICIENT-PAYMENT)
+    
+    (try! (stx-transfer? seller-amount tx-sender (get seller listing)))
+    (try! (stx-transfer? marketplace-fee tx-sender (as-contract tx-sender)))
+    (var-set contract-balance (+ (var-get contract-balance) marketplace-fee))
+    
+    (map-set domains
+      { name: domain }
+      (merge domain-info { owner: tx-sender })
+    )
+    
+    (map-delete domain-listings { domain: domain })
+    
+    (ok true)
+  )
+)
+
+(define-public (buy-subdomain (domain (string-ascii 64)) (subdomain (string-ascii 64)))
+  (let ((listing (unwrap! (get-subdomain-listing domain subdomain) ERR-LISTING-NOT-FOUND))
+        (subdomain-info (unwrap! (get-subdomain-info domain subdomain) ERR-SUBDOMAIN-NOT-FOUND))
+        (marketplace-fee (calculate-marketplace-fee (get price listing)))
+        (seller-amount (- (get price listing) marketplace-fee)))
+    
+    (asserts! (not (is-eq tx-sender (get seller listing))) ERR-CANNOT-BUY-OWN-LISTING)
+    (asserts! (not (is-listing-expired (get listed-at listing) (get expiry listing))) ERR-LISTING-EXPIRED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (>= (stx-get-balance tx-sender) (get price listing)) ERR-INSUFFICIENT-PAYMENT)
+    
+    (try! (stx-transfer? seller-amount tx-sender (get seller listing)))
+    (try! (stx-transfer? marketplace-fee tx-sender (as-contract tx-sender)))
+    (var-set contract-balance (+ (var-get contract-balance) marketplace-fee))
+    
+    (map-set subdomains
+      { domain: domain, subdomain: subdomain }
+      (merge subdomain-info { owner: tx-sender })
+    )
+    
+    (map-delete subdomain-listings { domain: domain, subdomain: subdomain })
+    
+    (ok true)
+  )
+)
+
+(define-public (cancel-domain-listing (domain (string-ascii 64)))
+  (let ((listing (unwrap! (get-domain-listing domain) ERR-LISTING-NOT-FOUND)))
+    (asserts! (is-eq (get seller listing) tx-sender) ERR-NOT-DOMAIN-OWNER)
+    
+    (map-delete domain-listings { domain: domain })
+    
+    (ok true)
+  )
+)
+
+(define-public (cancel-subdomain-listing (domain (string-ascii 64)) (subdomain (string-ascii 64)))
+  (let ((listing (unwrap! (get-subdomain-listing domain subdomain) ERR-LISTING-NOT-FOUND)))
+    (asserts! (is-eq (get seller listing) tx-sender) ERR-NOT-DOMAIN-OWNER)
+    
+    (map-delete subdomain-listings { domain: domain, subdomain: subdomain })
+    
+    (ok true)
+  )
+)
+
+(define-public (update-domain-listing-price (domain (string-ascii 64)) (new-price uint))
+  (let ((listing (unwrap! (get-domain-listing domain) ERR-LISTING-NOT-FOUND)))
+    (asserts! (is-eq (get seller listing) tx-sender) ERR-NOT-DOMAIN-OWNER)
+    (asserts! (> new-price u0) ERR-INSUFFICIENT-PAYMENT)
+    
+    (map-set domain-listings
+      { domain: domain }
+      (merge listing { price: new-price })
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (update-subdomain-listing-price (domain (string-ascii 64)) (subdomain (string-ascii 64)) (new-price uint))
+  (let ((listing (unwrap! (get-subdomain-listing domain subdomain) ERR-LISTING-NOT-FOUND)))
+    (asserts! (is-eq (get seller listing) tx-sender) ERR-NOT-DOMAIN-OWNER)
+    (asserts! (> new-price u0) ERR-INSUFFICIENT-PAYMENT)
+    
+    (map-set subdomain-listings
+      { domain: domain, subdomain: subdomain }
+      (merge listing { price: new-price })
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (set-marketplace-fee-percent (new-fee-percent uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+    (asserts! (<= new-fee-percent u50) ERR-INSUFFICIENT-PAYMENT)
+    (var-set marketplace-fee-percent new-fee-percent)
+    (ok true)
+  )
+)
