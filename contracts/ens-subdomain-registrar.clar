@@ -440,3 +440,181 @@
     (ok true)
   )
 )
+
+(define-constant ERR-NOT-AUTHORIZED (err u114))
+(define-constant ERR-RECORD-NOT-FOUND (err u115))
+
+(define-map address-records
+  { domain: (string-ascii 64), subdomain: (optional (string-ascii 64)), record-type: (string-ascii 32) }
+  { address-value: (string-ascii 128), set-at: uint }
+)
+
+(define-map text-records
+  { domain: (string-ascii 64), subdomain: (optional (string-ascii 64)), record-type: (string-ascii 32) }
+  { text-value: (string-ascii 256), set-at: uint }
+)
+
+(define-map content-records
+  { domain: (string-ascii 64), subdomain: (optional (string-ascii 64)) }
+  { content-hash: (string-ascii 128), set-at: uint }
+)
+
+(define-private (is-domain-or-subdomain-owner (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (user principal))
+  (match subdomain
+    sub-name (match (get-subdomain-info domain sub-name)
+      subdomain-info (is-eq (get owner subdomain-info) user)
+      false
+    )
+    (match (get-domain-info domain)
+      domain-info (is-eq (get owner domain-info) user)
+      false
+    )
+  )
+)
+
+(define-read-only (get-address-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)))
+  (match (map-get? address-records { domain: domain, subdomain: subdomain, record-type: record-type })
+    record (some record)
+    (match subdomain
+      sub-name none
+      (map-get? address-records { domain: domain, subdomain: none, record-type: record-type })
+    )
+  )
+)
+
+(define-read-only (get-text-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)))
+  (match (map-get? text-records { domain: domain, subdomain: subdomain, record-type: record-type })
+    record (some record)
+    (match subdomain
+      sub-name none
+      (map-get? text-records { domain: domain, subdomain: none, record-type: record-type })
+    )
+  )
+)
+
+(define-read-only (get-content-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))))
+  (match (map-get? content-records { domain: domain, subdomain: subdomain })
+    record (some record)
+    (match subdomain
+      sub-name none
+      (map-get? content-records { domain: domain, subdomain: none })
+    )
+  )
+)
+
+(define-public (set-address-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)) (address-value (string-ascii 128)))
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (> (len address-value) u0) ERR-INVALID-NAME)
+    
+    (map-set address-records
+      { domain: domain, subdomain: subdomain, record-type: record-type }
+      { address-value: address-value, set-at: stacks-block-height }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (set-text-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)) (text-value (string-ascii 256)))
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (> (len text-value) u0) ERR-INVALID-NAME)
+    
+    (map-set text-records
+      { domain: domain, subdomain: subdomain, record-type: record-type }
+      { text-value: text-value, set-at: stacks-block-height }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (set-content-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (content-hash (string-ascii 128)))
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    (asserts! (> (len content-hash) u0) ERR-INVALID-NAME)
+    
+    (map-set content-records
+      { domain: domain, subdomain: subdomain }
+      { content-hash: content-hash, set-at: stacks-block-height }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (delete-address-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)))
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    
+    (map-delete address-records { domain: domain, subdomain: subdomain, record-type: record-type })
+    
+    (ok true)
+  )
+)
+
+(define-public (delete-text-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)))
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    
+    (map-delete text-records { domain: domain, subdomain: subdomain, record-type: record-type })
+    
+    (ok true)
+  )
+)
+
+(define-public (delete-content-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))))
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    
+    (map-delete content-records { domain: domain, subdomain: subdomain })
+    
+    (ok true)
+  )
+)
+
+(define-public (set-multiple-records 
+  (domain (string-ascii 64)) 
+  (subdomain (optional (string-ascii 64))) 
+  (stx-address (optional (string-ascii 128)))
+  (btc-address (optional (string-ascii 128)))
+  (email (optional (string-ascii 256)))
+  (website (optional (string-ascii 256)))
+  (content-hash (optional (string-ascii 128)))
+)
+  (begin
+    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    
+    (match stx-address
+      addr (try! (set-address-record domain subdomain "stx" addr))
+      true
+    )
+    
+    (match btc-address
+      addr (try! (set-address-record domain subdomain "btc" addr))
+      true
+    )
+    
+    (match email
+      mail (try! (set-text-record domain subdomain "email" mail))
+      true
+    )
+    
+    (match website
+      site (try! (set-text-record domain subdomain "website" site))
+      true
+    )
+    
+    (match content-hash
+      hash (try! (set-content-record domain subdomain hash))
+      true
+    )
+    
+    (ok true)
+  )
+)
