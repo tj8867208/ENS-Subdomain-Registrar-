@@ -618,3 +618,109 @@
     (ok true)
   )
 )
+
+(define-constant ERR-PRIMARY-NAME-NOT-SET (err u116))
+(define-constant ERR-NAME-MISMATCH (err u117))
+
+(define-map reverse-records
+  { address: principal }
+  { 
+    domain: (string-ascii 64), 
+    subdomain: (optional (string-ascii 64)),
+    set-at: uint
+  }
+)
+
+(define-read-only (get-primary-name (address principal))
+  (map-get? reverse-records { address: address })
+)
+
+(define-read-only (resolve-principal (address principal))
+  (match (get-primary-name address)
+    record (match (get subdomain record)
+      sub-name (some (concat (concat (get domain record) ".") sub-name))
+      (some (get domain record))
+    )
+    none
+  )
+)
+
+(define-read-only (get-name-owner (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))))
+  (match subdomain
+    sub-name (match (get-subdomain-info domain sub-name)
+      info (some (get owner info))
+      none
+    )
+    (match (get-domain-info domain)
+      info (some (get owner info))
+      none
+    )
+  )
+)
+
+(define-private (verify-name-ownership (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (claimer principal))
+  (match (get-name-owner domain subdomain)
+    owner (is-eq owner claimer)
+    false
+  )
+)
+
+(define-public (set-primary-name (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))))
+  (begin
+    (asserts! (verify-name-ownership domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
+    
+    (map-set reverse-records
+      { address: tx-sender }
+      { 
+        domain: domain, 
+        subdomain: subdomain,
+        set-at: stacks-block-height
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (clear-primary-name)
+  (begin
+    (asserts! (is-some (get-primary-name tx-sender)) ERR-PRIMARY-NAME-NOT-SET)
+    
+    (map-delete reverse-records { address: tx-sender })
+    
+    (ok true)
+  )
+)
+
+(define-public (update-primary-name (new-domain (string-ascii 64)) (new-subdomain (optional (string-ascii 64))))
+  (begin
+    (asserts! (is-some (get-primary-name tx-sender)) ERR-PRIMARY-NAME-NOT-SET)
+    (try! (set-primary-name new-domain new-subdomain))
+    
+    (ok true)
+  )
+)
+
+(define-read-only (has-primary-name (address principal))
+  (is-some (get-primary-name address))
+)
+
+(define-read-only (get-display-name (address principal))
+  (match (resolve-principal address)
+    name name
+    ""
+  )
+)
+
+(define-read-only (batch-resolve-principals (addresses (list 10 principal)))
+  (map resolve-principal addresses)
+)
+
+(define-public (set-primary-name-for-domain (domain (string-ascii 64)))
+  (set-primary-name domain none)
+)
+
+(define-public (set-primary-name-for-subdomain (domain (string-ascii 64)) (subdomain (string-ascii 64)))
+  (set-primary-name domain (some subdomain))
+)
