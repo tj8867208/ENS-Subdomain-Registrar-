@@ -502,9 +502,38 @@
   )
 )
 
+(define-map domain-operators
+  { domain: (string-ascii 64), operator: principal }
+  { set-at: uint }
+)
+
+(define-read-only (is-domain-operator (domain (string-ascii 64)) (operator principal))
+  (is-some (map-get? domain-operators { domain: domain, operator: operator }))
+)
+
+(define-private (is-authorized (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (user principal))
+  (or (is-domain-or-subdomain-owner domain subdomain user) (is-domain-operator domain user))
+)
+
+(define-public (add-domain-operator (domain (string-ascii 64)) (operator principal))
+  (begin
+    (asserts! (is-domain-owner domain tx-sender) ERR-NOT-DOMAIN-OWNER)
+    (map-set domain-operators { domain: domain, operator: operator } { set-at: stacks-block-height })
+    (ok true)
+  )
+)
+
+(define-public (remove-domain-operator (domain (string-ascii 64)) (operator principal))
+  (begin
+    (asserts! (is-domain-owner domain tx-sender) ERR-NOT-DOMAIN-OWNER)
+    (map-delete domain-operators { domain: domain, operator: operator })
+    (ok true)
+  )
+)
+
 (define-public (set-address-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)) (address-value (string-ascii 128)))
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
     (asserts! (> (len address-value) u0) ERR-INVALID-NAME)
     
@@ -519,7 +548,7 @@
 
 (define-public (set-text-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)) (text-value (string-ascii 256)))
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
     (asserts! (> (len text-value) u0) ERR-INVALID-NAME)
     
@@ -534,7 +563,7 @@
 
 (define-public (set-content-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (content-hash (string-ascii 128)))
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
     (asserts! (> (len content-hash) u0) ERR-INVALID-NAME)
     
@@ -549,7 +578,7 @@
 
 (define-public (delete-address-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)))
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     
     (map-delete address-records { domain: domain, subdomain: subdomain, record-type: record-type })
     
@@ -559,7 +588,7 @@
 
 (define-public (delete-text-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))) (record-type (string-ascii 32)))
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     
     (map-delete text-records { domain: domain, subdomain: subdomain, record-type: record-type })
     
@@ -569,7 +598,7 @@
 
 (define-public (delete-content-record (domain (string-ascii 64)) (subdomain (optional (string-ascii 64))))
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     
     (map-delete content-records { domain: domain, subdomain: subdomain })
     
@@ -587,7 +616,7 @@
   (content-hash (optional (string-ascii 128)))
 )
   (begin
-    (asserts! (is-domain-or-subdomain-owner domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized domain subdomain tx-sender) ERR-NOT-AUTHORIZED)
     (asserts! (not (is-domain-expired domain)) ERR-DOMAIN-EXPIRED)
     
     (match stx-address
