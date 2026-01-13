@@ -753,3 +753,37 @@
 (define-public (set-primary-name-for-subdomain (domain (string-ascii 64)) (subdomain (string-ascii 64)))
   (set-primary-name domain (some subdomain))
 )
+
+(define-read-only (quote-domain-registration (name (string-ascii 64)) (duration uint))
+  (let ((fee (var-get domain-registration-fee))
+        (valid (is-valid-name name))
+        (available (is-none (get-domain-info name)))
+        (expiry (+ stacks-block-height duration)))
+    { fee: fee, expiry: expiry, valid: valid, available: available }
+  )
+)
+
+(define-read-only (quote-subdomain-registration (domain (string-ascii 64)) (subdomain (string-ascii 64)))
+  (let ((fee (var-get subdomain-registration-fee))
+        (valid (is-valid-name subdomain))
+        (available (is-none (get-subdomain-info domain subdomain)))
+        (domain-exists (is-some (get-domain-info domain)))
+        (domain-expired (match (get-domain-info domain)
+          info (> stacks-block-height (get expiry info))
+          false)))
+    { fee: fee, valid: valid, available: available, domain-exists: domain-exists, domain-expired: domain-expired }
+  )
+)
+
+(define-read-only (quote-domain-renewal (name (string-ascii 64)) (additional-duration uint))
+  (let ((fee (var-get domain-registration-fee))
+        (exists (is-some (get-domain-info name)))
+        (new-expiry (match (get-domain-info name)
+          info (+ (get expiry info) additional-duration)
+          u0))
+        (authorized (match (get-domain-info name)
+          info (is-eq (get owner info) tx-sender)
+          false)))
+    { fee: fee, new-expiry: new-expiry, authorized: authorized, exists: exists }
+  )
+)
